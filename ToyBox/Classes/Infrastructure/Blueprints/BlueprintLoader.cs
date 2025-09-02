@@ -146,6 +146,9 @@ namespace ToyBox {
             } else {
                 allEntries = toc.Where(item => toLoad.Contains(item.Key)).OrderBy(e => e.Value.Offset).Select(e => e.Key);
             }
+            allEntries = allEntries
+                .Concat(OwlcatModificationsManager.Instance.AppliedModifications.SelectMany(m => m.Blueprints).Select(BlueprintGuid.Parse))
+                .Distinct();
             total = allEntries.Count();
             Mod.Log($"Loading {total} Blueprints");
             _blueprints = new(total);
@@ -196,27 +199,25 @@ namespace ToyBox {
                                 int shardIndex = Math.Abs(guid.GetHashCode()) % Main.Settings.BlueprintsLoaderNumShards;
                                 var startedLoading = _startedLoadingShards[shardIndex];
                                 if (!startedLoading.TryAdd(guid, @lock)) continue;
+                                SimpleBlueprint simpleBlueprint = null;
                                 if (ResourcesLibrary.BlueprintsCache.m_LoadedBlueprints.TryGetValue(guid, out var entry)) {
                                     if (entry.Blueprint != null) {
                                         closeCountLocal++;
                                         _blueprints[entryPairA.Item2] = entry.Blueprint;
                                         continue;
                                     }
-                                } else {
-                                    continue;
-                                }
-                                if (Shared.BadBlueprints.Contains(guid.ToString()) || entry.Offset == 0U) continue;
-                                OnBeforeBPLoad(guid);
-                                stream.Seek(entry.Offset, SeekOrigin.Begin);
-                                SimpleBlueprint simpleBlueprint = null;
-                                seralizer.Blueprint(ref simpleBlueprint);
-                                if (simpleBlueprint == null) {
-                                    closeCountLocal++;
-                                    continue;
+                                    if (Shared.BadBlueprints.Contains(guid.ToString()) || entry.Offset == 0U) continue;
+                                    OnBeforeBPLoad(guid);
+                                    stream.Seek(entry.Offset, SeekOrigin.Begin);
+                                    seralizer.Blueprint(ref simpleBlueprint);
                                 }
                                 object obj;
                                 OwlcatModificationsManager.Instance.OnResourceLoaded(simpleBlueprint, guid.ToString(), out obj);
                                 simpleBlueprint = (obj as SimpleBlueprint) ?? simpleBlueprint;
+                                if (simpleBlueprint == null) {
+                                    closeCountLocal++;
+                                    continue;
+                                }
                                 entry.Blueprint = simpleBlueprint;
                                 simpleBlueprint.OnEnable();
                                 _blueprints[entryPairA.Item2] = simpleBlueprint;
@@ -313,14 +314,21 @@ namespace ToyBox {
                 }
                 */
             }
-            [HarmonyPatch(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.ApplyPatchEntry)), HarmonyPrefix]
-            private static bool OwlcatModificationBlueprintPatcher_ApplyPatchEntry(JObject jsonBlueprint, JObject patchEntry) {
-                JsonMergeSettings settings = new() {
-                    MergeArrayHandling = OwlcatModificationBlueprintPatcher.ExtractMergeArraySettings(patchEntry),
-                    MergeNullValueHandling = OwlcatModificationBlueprintPatcher.ExtractNullArraySettings(patchEntry)
-                };
-                jsonBlueprint.Merge(patchEntry, settings);
-                return false;
+            private static readonly ThreadLocal<JsonMergeSettings> MergeSettings = new(() => new());
+            private static readonly FieldInfo OriginalJsonMergeSettingsField = AccessTools.Field(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
+            private static readonly FieldInfo NewJsonMergeSettingsField = AccessTools.Field(typeof(BlueprintLoader), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
+            [HarmonyPatch(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.ApplyPatchEntry)), HarmonyTranspiler]
+            private static IEnumerable<CodeInstruction> OwlcatModificationBlueprintPatcher_ApplyPatchEntry(IEnumerable<CodeInstruction> instructions) {
+                foreach (var i in instructions) {
+                    if (i.LoadsField(OriginalJsonMergeSettingsField)) {
+                        i.operand = NewJsonMergeSettingsField;
+                        yield return i;
+                        yield return CodeInstruction.Call((ThreadLocal<JsonMergeSettings> threadLocal) => threadLocal.Value);
+                        continue;
+                    }
+
+                    yield return i;
+                }
             }
             private static readonly ConcurrentDictionary<SimpleBlueprint, JObject> m_JsonBlueprintsCache = [];
             [ThreadStatic]
