@@ -316,7 +316,7 @@ namespace ToyBox {
             }
             private static readonly ThreadLocal<JsonMergeSettings> MergeSettings = new(() => new());
             private static readonly FieldInfo OriginalJsonMergeSettingsField = AccessTools.Field(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
-            private static readonly FieldInfo NewJsonMergeSettingsField = AccessTools.Field(typeof(BlueprintLoader), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
+            private static readonly FieldInfo NewJsonMergeSettingsField = AccessTools.Field(typeof(BlueprintLoaderPatches), nameof(MergeSettings));
             [HarmonyPatch(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.ApplyPatchEntry)), HarmonyTranspiler]
             private static IEnumerable<CodeInstruction> OwlcatModificationBlueprintPatcher_ApplyPatchEntry(IEnumerable<CodeInstruction> instructions) {
                 foreach (var i in instructions) {
