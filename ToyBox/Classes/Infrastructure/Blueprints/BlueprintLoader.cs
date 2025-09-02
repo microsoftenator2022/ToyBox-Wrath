@@ -313,14 +313,21 @@ namespace ToyBox {
                 }
                 */
             }
-            [HarmonyPatch(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.ApplyPatchEntry)), HarmonyPrefix]
-            private static bool OwlcatModificationBlueprintPatcher_ApplyPatchEntry(JObject jsonBlueprint, JObject patchEntry) {
-                JsonMergeSettings settings = new() {
-                    MergeArrayHandling = OwlcatModificationBlueprintPatcher.ExtractMergeArraySettings(patchEntry),
-                    MergeNullValueHandling = OwlcatModificationBlueprintPatcher.ExtractNullArraySettings(patchEntry)
-                };
-                jsonBlueprint.Merge(patchEntry, settings);
-                return false;
+            private static readonly ThreadLocal<JsonMergeSettings> MergeSettings = new(() => new());
+            private static readonly FieldInfo OriginalJsonMergeSettingsField = AccessTools.Field(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
+            private static readonly FieldInfo NewJsonMergeSettingsField = AccessTools.Field(typeof(BlueprintLoader), nameof(OwlcatModificationBlueprintPatcher.MergeSettings));
+            [HarmonyPatch(typeof(OwlcatModificationBlueprintPatcher), nameof(OwlcatModificationBlueprintPatcher.ApplyPatchEntry)), HarmonyTranspiler]
+            private static IEnumerable<CodeInstruction> OwlcatModificationBlueprintPatcher_ApplyPatchEntry(IEnumerable<CodeInstruction> instructions) {
+                foreach (var i in instructions) {
+                    if (i.LoadsField(OriginalJsonMergeSettingsField)) {
+                        i.operand = NewJsonMergeSettingsField;
+                        yield return i;
+                        yield return CodeInstruction.Call((ThreadLocal<JsonMergeSettings> threadLocal) => threadLocal.Value);
+                        continue;
+                    }
+
+                    yield return i;
+                }
             }
             private static readonly ConcurrentDictionary<SimpleBlueprint, JObject> m_JsonBlueprintsCache = [];
             [ThreadStatic]
